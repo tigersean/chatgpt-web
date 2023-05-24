@@ -3,9 +3,6 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "engines": {
-    "node": ">= 14"
-  },
   "scripts": {
     "dev": "vite",
     "dev:public": "vite --host 0.0.0.0",
