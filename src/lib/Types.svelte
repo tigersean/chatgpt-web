@@ -1,36 +1,74 @@
 <script context="module" lang="ts">
-  export const supportedModels = [ // See: https://platform.openai.com/docs/models/model-endpoint-compatibility
-    'gpt-4',
-    'gpt-4-0314',
-    'gpt-4-32k',
-    'gpt-4-32k-0314',
-    'gpt-3.5-turbo',
-    'gpt-3.5-turbo-0301'
-  ]
-  export type Model = typeof supportedModels[number];
+    import type { IconDefinition } from '@fortawesome/free-solid-svg-icons'
+import { supportedModelKeys } from './Models.svelte'
+import { imageGenerationSizeTypes } from './Settings.svelte'
 
-  export type Usage = {
+export type Model = typeof supportedModelKeys[number];
+
+export type ImageGenerationSizes = typeof imageGenerationSizeTypes[number];
+
+export type ModelDetail = {
+    prompt: number;
+    completion: number;
+    max: number;
+  };
+
+export type Usage = {
     completion_tokens: number;
     prompt_tokens: number;
     total_tokens: number;
   };
 
-  export type Message = {
-    role: 'user' | 'assistant' | 'system' | 'error';
+export interface ChatImage {
+    id: string;
+    b64image: string;
+    chats: number[];
+  }
+
+export type Message = {
+    role: 'user' | 'assistant' | 'system' | 'error' | 'image';
     content: string;
+    uuid: string;
     usage?: Usage;
     model?: Model;
+    removed?: boolean;
+    summarized?: string[];
+    summary?: string[];
+    suppress?: boolean;
+    finish_reason?: string;
+    streaming?: boolean;
+    image?: ChatImage;
+    created?: number;
+    skipOnce?: boolean;
+    appendOnce?: string[];
   };
 
-  export type Chat = {
-    id: number;
-    name: string;
-    messages: Message[];
-  };
+export type ResponseAlteration = {
+    type: 'prompt' | 'replace';
+    match: string;
+    replace: string;
+  }
 
-  export type Request = {
-    model?: Model;
-    messages: Message[];
+export type ResponseImageDetail = {
+    url: string;
+    b64_json: string;
+  }
+
+export type ResponseImage = {
+    created: number;
+    data: ResponseImageDetail[];
+  }
+
+export type RequestImageGeneration = {
+    prompt: string;
+    n?: number;
+    size?: ImageGenerationSizes;
+    response_format?: keyof ResponseImageDetail;
+  }
+
+export type Request = {
+    model: Model;
+    messages?: Message[];
     temperature?: number;
     top_p?: number;
     n?: number;
@@ -39,29 +77,47 @@
     max_tokens?: number;
     presence_penalty?: number;
     frequency_penalty?: number;
-    logit_bias?: Record<string, any>;
+    logit_bias?: Record<string, any> | null;
     user?: string;
   };
 
-  type SettingsNumber = {
-    type: 'number';
-    default: number;
-    min: number;
-    max: number;
-    step: number;
-  };
+export type ChatSettings = {
+    profile: string,
+    characterName: string,
+    profileName: string,
+    profileDescription: string,
+    continuousChat: (''|'fifo'|'summary');
+    summaryThreshold: number;
+    summarySize: number;
+    summaryExtend: number;
+    summaryTemperature: number;
+    pinTop: number;
+    pinBottom: number;
+    summaryPrompt: string;
+    useSystemPrompt: boolean;
+    systemPrompt: string;
+    autoStartSession: boolean;
+    hiddenPromptPrefix: string;
+    hppContinuePrompt: string; // hiddenPromptPrefix used, optional glue when trying to continue truncated completion
+    imageGenerationSize: ImageGenerationSizes;
+    trainingPrompts?: Message[];
+    useResponseAlteration?: boolean;
+    responseAlterations?: ResponseAlteration[];
+    isDirty?: boolean;
+  } & Request;
 
-  export type SettingsSelect = {
-    type: 'select';
-    default: Model;
-    options: Model[];
-  };
-
-  export type Settings = {
-    key: string;
+export type Chat = {
+    id: number;
     name: string;
-    title: string;
-  } & (SettingsNumber | SettingsSelect);
+    messages: Message[];
+    usage: Record<Model, Usage>;
+    settings: ChatSettings;
+    startSession: boolean;
+    sessionStarted: boolean;
+    created: number;
+    lastUse: number;
+    lastAccess: number;
+  };
 
   type ResponseOK = {
     id: string;
@@ -71,6 +127,7 @@
       index: number;
       message: Message;
       finish_reason: string;
+      delta: Message;
     }[];
     usage: Usage;
     model: Model;
@@ -85,12 +142,133 @@
     };
   };
 
-  export type Response = ResponseOK & ResponseError;
+export type Response = ResponseOK & ResponseError;
 
-  export type ResponseModels = {
+export type ResponseModels = {
     object: 'list';
     data: {
       id: string;
     }[];
   };
+
+export type ChatCompletionOpts = {
+    chat: Chat;
+    autoAddMessages: boolean;
+    maxTokens?:number;
+    summaryRequest?:boolean;
+    didSummary?:boolean;
+    streaming?:boolean;
+    onMessageChange?: (messages: Message[]) => void;
+    fillMessage?:Message,
+  };
+
+export type ChatSortOptions = 'name'|'created'|'lastUse'|'lastAccess';
+
+export type GlobalSettings = {
+    profiles: Record<string, ChatSettings>;
+    lastProfile: string|null;
+    defaultProfile: string;
+    hideSummarized: boolean;
+    chatSort: ChatSortOptions;
+  };
+
+  type SettingNumber = {
+    type: 'number';
+    min: number;
+    max: number;
+    step: number;
+  };
+
+export type SelectOption = {
+    value: string|number;
+    text: string;
+  };
+
+export type ChatSortOption = SelectOption & {
+    sortFn: (a: Chat, b: Chat) => number;
+    icon: IconDefinition;
+  };
+
+  type SettingBoolean = {
+    type: 'boolean';
+  };
+
+export type SettingSelect = {
+    type: 'select';
+    options: SelectOption[];
+  };
+
+export type SettingSelectNumber = {
+    type: 'select-number';
+    options: SelectOption[];
+  };
+
+export type SettingText = {
+    type: 'text';
+  };
+
+export type SettingTextArea = {
+    type: 'textarea';
+    lines?: number;
+  };
+
+export type SettingOther = {
+    type: 'other';
+  };
+
+export type ControlAction = {
+    title:string;
+    icon?:any,
+    text?:string;
+    class?:string;
+    disabled?:boolean;
+    action?: (chatId:number, setting:any, value:any) => any;
+  };
+
+export type FieldControl = {
+    getAction: (chatId:number, setting:any, value:any) => ControlAction;
+  };
+
+export type SubSetting = {
+    type: 'subset';
+    settings: any[];
+  };
+
+export type ChatSetting = {
+    key: keyof ChatSettings;
+    name: string;
+    title: string;
+    forceApi?: boolean; // force in api requests, even if set to default
+    hidden?: boolean; // Hide from setting menus
+    header?: string;
+    headerClass?: string;
+    placeholder?: string;
+    hide?: (chatId:number) => boolean;
+    apiTransform?: (chatId:number, setting:ChatSetting, value:any) => any;
+    fieldControls?: FieldControl[];
+    beforeChange?: (chatId:number, setting:ChatSetting, value:any) => boolean;
+    afterChange?: (chatId:number, setting:ChatSetting, value:any) => boolean;
+  } & (SettingNumber | SettingSelect | SettingSelectNumber | SettingBoolean | SettingText | SettingTextArea | SettingOther | SubSetting);
+
+
+export type GlobalSetting = {
+    key: keyof GlobalSettings;
+    name?: string;
+    title?: string;
+    required?: boolean; // force in request
+    hidden?: boolean; // Hide from setting menus
+    header?: string;
+    headerClass?: string;
+  } & (SettingNumber | SettingSelect | SettingBoolean | SettingText | SettingOther);
+
+export type SettingPrompt = {
+    title: string;
+    message: string;
+    class?: string;
+    checkPrompt: (setting:ChatSetting, newVal:any, oldVal:any)=>boolean;
+    onYes?: (setting:ChatSetting, newVal:any, oldVal:any)=>boolean;
+    onNo?: (setting:ChatSetting, newVal:any, oldVal:any)=>boolean;
+    passed: boolean;
+  };
+
 </script>
