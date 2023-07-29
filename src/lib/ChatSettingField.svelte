@@ -3,7 +3,7 @@
   // import { getProfile } from './Profiles.svelte'
   import { cleanSettingValue, setChatSettingValue } from './Storage.svelte'
   import type { Chat, ChatSetting, ChatSettings, ControlAction, FieldControl, SettingPrompt } from './Types.svelte'
-  import { autoGrowInputOnEvent, errorNotice } from './Util.svelte'
+  import { autoGrowInputOnEvent, errorNotice, valueOf } from './Util.svelte'
   // import { replace } from 'svelte-spa-router'
   import Fa from 'svelte-fa/src/fa.svelte'
   import { openModal } from 'svelte-modals'
@@ -17,20 +17,37 @@
   export let originalProfile:String
   export let rkey:number = 0
 
+
+  let fieldControls:ControlAction[]
+
   const chatId = chat.id
   let show = false
 
+  let header = valueOf(chatId, setting.header)
+  let headerClass = valueOf(chatId, setting.headerClass)
+  let placeholder = valueOf(chatId, setting.placeholder)
+  
+  const buildFieldControls = () => {
+    fieldControls = (setting.fieldControls || [] as FieldControl[]).map(fc => {
+      return fc.getAction(chatId, setting, chatSettings[setting.key])
+    })
+  }
+
+  buildFieldControls()
+
   onMount(() => {
     show = (typeof setting.hide !== 'function') || !setting.hide(chatId)
+    buildFieldControls()
   })
 
   afterUpdate(() => {
     show = (typeof setting.hide !== 'function') || !setting.hide(chatId)
+    header = valueOf(chatId, setting.header)
+    headerClass = valueOf(chatId, setting.headerClass)
+    placeholder = valueOf(chatId, setting.placeholder)
+    buildFieldControls()
   })
 
-  const fieldControls:ControlAction[] = (setting.fieldControls || [] as FieldControl[]).map(fc => {
-    return fc.getAction(chatId, setting, chatSettings[setting.key])
-  })
 
   if (originalProfile) {
     // eventually...
@@ -136,9 +153,9 @@
 </script>
 
 {#if show}
-  {#if setting.header}
-  <p class="notification {setting.headerClass}">
-    {@html setting.header}
+  {#if header}
+  <p class="notification {headerClass}">
+    {@html header}
   </p>
   {/if}
   <div class="field is-horizontal">
@@ -161,7 +178,7 @@
       <label class="label" for="settings-{setting.key}" title="{setting.title}">{setting.name}</label>
       <textarea
         class="input is-info is-focused chat-input auto-size"
-        placeholder={setting.placeholder || ''}
+        placeholder={placeholder || ''}
         rows="1"
         on:input={e => autoGrowInputOnEvent(e)}
         on:change={e => { queueSettingValueChange(e, setting); autoGrowInputOnEvent(e) }}
@@ -185,7 +202,7 @@
             min={setting.min}
             max={setting.max}
             step={setting.step}
-            placeholder={String(setting.placeholder || chatDefaults[setting.key])}
+            placeholder={String(placeholder || chatDefaults[setting.key])}
             on:change={e => queueSettingValueChange(e, setting)}
           />
         {:else if setting.type === 'select' || setting.type === 'select-number'}
@@ -194,7 +211,7 @@
             {#key rkey}
             <select id="settings-{setting.key}" title="{setting.title}" on:change={e => queueSettingValueChange(e, setting) } >
               {#each setting.options as option}
-                <option class:is-default={option.value === chatDefaults[setting.key]} value={option.value} selected={option.value === chatSettings[setting.key]}>{option.text}</option>
+                <option class:is-default={option.value === chatDefaults[setting.key]} value={option.value} selected={option.value === chatSettings[setting.key]} disabled={option.disabled}>{option.text}</option>
               {/each}
             </select>
             {/key}
@@ -223,6 +240,7 @@
               title="{setting.title}"
               class="input" 
               value={chatSettings[setting.key]} 
+              placeholder={String(placeholder || chatDefaults[setting.key])}
               on:change={e => { queueSettingValueChange(e, setting) }}
             >
           </div>

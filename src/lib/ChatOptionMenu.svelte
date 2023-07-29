@@ -18,14 +18,15 @@
     faEyeSlash
   } from '@fortawesome/free-solid-svg-icons/index'
   import { faSquareMinus, faSquarePlus as faSquarePlusOutline } from '@fortawesome/free-regular-svg-icons/index'
-  import { apiKeyStorage, addChatFromJSON, chatsStorage, checkStateChange, clearChats, clearMessages, copyChat, globalStorage, setGlobalSettingValueByKey, showSetChatSettings, pinMainMenu, getChat, deleteChat, saveChatStore } from './Storage.svelte'
+  import { addChatFromJSON, chatsStorage, checkStateChange, clearChats, clearMessages, copyChat, globalStorage, setGlobalSettingValueByKey, showSetChatSettings, pinMainMenu, getChat, deleteChat, saveChatStore, saveCustomProfile, hasActiveModels } from './Storage.svelte'
   import { exportAsMarkdown, exportChatAsJSON } from './Export.svelte'
-  import { restartProfile } from './Profiles.svelte'
+  import { newNameForProfile, restartProfile } from './Profiles.svelte'
   import { replace } from 'svelte-spa-router'
   import { clickOutside } from 'svelte-use-click-outside'
   import { openModal } from 'svelte-modals'
   import PromptConfirm from './PromptConfirm.svelte'
-  import { startNewChatWithWarning, startNewChatFromChatId } from './Util.svelte'
+  import { startNewChatWithWarning, startNewChatFromChatId, errorNotice, encodeHTMLEntities } from './Util.svelte'
+  import type { ChatSettings } from './Types.svelte'
 
   export let chatId
   export const show = (showHide:boolean = true) => {
@@ -37,10 +38,12 @@
 
   let showChatMenu = false
   let chatFileInput
+  let profileFileInput
 
   const importChatFromFile = (e) => {
     close()
     const image = e.target.files[0]
+    e.target.value = null
     const reader = new FileReader()
     reader.readAsText(image)
     reader.onload = e => {
@@ -121,6 +124,38 @@
     })
   }
 
+  const importProfileFromFile = (e) => {
+    const image = e.target.files[0]
+    e.target.value = null
+    const reader = new FileReader()
+    reader.onload = e => {
+      const json = (e.target || {}).result as string
+      try {
+        const profile = JSON.parse(json) as ChatSettings
+        profile.profileName = newNameForProfile(profile.profileName || '')
+        profile.profile = null as any
+        saveCustomProfile(profile)
+        openModal(PromptConfirm, {
+          title: 'Profile Restored',
+          class: 'is-info',
+          message: 'Profile restored as:<br><strong>' + encodeHTMLEntities(profile.profileName) +
+            '</strong><br><br>Start new chat with this profile?',
+          asHtml: true,
+          onConfirm: () => {
+            startNewChatWithWarning(chatId, profile)
+          },
+          onCancel: () => {}
+        })
+      } catch (e) {
+        errorNotice('Unable to import profile:', e)
+      }
+    }
+    reader.onerror = e => {
+      errorNotice('Unable to import profile:', new Error('Unknown error'))
+    }
+    reader.readAsText(image)
+  }
+
 </script>
 
 <div class="dropdown {style}" class:is-active={showChatMenu} use:clickOutside={() => { showChatMenu = false }}>
@@ -138,7 +173,7 @@
         <span class="menu-icon"><Fa icon={faGear}/></span> Chat Profile Settings
       </a>
       <hr class="dropdown-divider">
-      <a href={'#'} class:is-disabled={!$apiKeyStorage} on:click|preventDefault={() => { $apiKeyStorage && close(); $apiKeyStorage && startNewChatWithWarning(chatId) }} class="dropdown-item">
+      <a href={'#'} class:is-disabled={!hasActiveModels()} on:click|preventDefault={() => { hasActiveModels() && close(); hasActiveModels() && startNewChatWithWarning(chatId) }} class="dropdown-item">
         <span class="menu-icon"><Fa icon={faSquarePlus}/></span> New Chat from Default
       </a>
       <a href={'#'} class:is-disabled={!chatId} on:click|preventDefault={() => { chatId && close(); chatId && startNewChatFromChatId(chatId) }} class="dropdown-item">
@@ -161,11 +196,15 @@
       <a href={'#'} class="dropdown-item" class:is-disabled={!chatId} on:click|preventDefault={() => { close(); exportChatAsJSON(chatId) }}>
         <span class="menu-icon"><Fa icon={faDownload}/></span> Backup Chat JSON
       </a>
-      <a href={'#'} class="dropdown-item" class:is-disabled={!$apiKeyStorage} on:click|preventDefault={() => { if (chatId) close(); chatFileInput.click() }}>
+      <a href={'#'} class="dropdown-item" class:is-disabled={!hasActiveModels()} on:click|preventDefault={() => { if (chatId) close(); chatFileInput.click() }}>
         <span class="menu-icon"><Fa icon={faUpload}/></span> Restore Chat JSON
       </a>
       <a href={'#'} class="dropdown-item" class:is-disabled={!chatId} on:click|preventDefault={() => { if (chatId) close(); exportAsMarkdown(chatId) }}>
         <span class="menu-icon"><Fa icon={faFileExport}/></span> Export Chat Markdown
+      </a>
+      <hr class="dropdown-divider">
+      <a href={'#'} class="dropdown-item" class:is-disabled={!hasActiveModels()} on:click|preventDefault={() => { if (chatId) close(); profileFileInput.click() }}>
+        <span class="menu-icon"><Fa icon={faUpload}/></span> Restore Profile JSON
       </a>
       <hr class="dropdown-divider">
       <a href={'#'} class="dropdown-item" class:is-disabled={!chatId} on:click|preventDefault={() => { if (chatId) close(); delChat() }}>
@@ -191,3 +230,4 @@
 </div>
 
 <input style="display:none" type="file" accept=".json" on:change={(e) => importChatFromFile(e)} bind:this={chatFileInput} >
+<input style="display:none" type="file" accept=".json" on:change={(e) => importProfileFromFile(e)} bind:this={profileFileInput} >
