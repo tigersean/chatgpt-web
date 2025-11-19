@@ -1,3 +1,12 @@
+/*
+  ChatRequest.svelte
+  ------------------
+  This module defines the ChatRequest class, which manages the logic for sending chat completion requests to various language model APIs within the chat application.
+  It handles message filtering, prompt construction, token counting, error handling, and advanced features such as continuous chat (with FIFO or summary-based reduction),
+  hidden prompt injection, and image prompt detection. The class is responsible for orchestrating the flow of chat messages, preparing API requests according to chat
+  settings, and processing responses, including streaming and summarization. It integrates with other modules for storage, UI updates, and model-specific details.
+*/
+
 <script context="module" lang="ts">
     import { ChatCompletionResponse } from './ChatCompletionResponse.svelte'
     import { cleanContent, mergeProfileFields, prepareSummaryPrompt } from './Profiles.svelte'
@@ -23,9 +32,9 @@ export class ChatRequest {
       controller:AbortController
       providerData: Record<string, any> = {}
 
-      setChat (chat: Chat) {
+      async setChat (chat: Chat) {
         this.chat = chat
-        this.chat.settings.model = this.getModel()
+        this.chat.settings.model = await this.getModel()
       }
 
       getChat (): Chat {
@@ -63,7 +72,7 @@ export class ChatRequest {
         // TODO:  Continue to break this method down to smaller chunks
         const _this = this
         const chat = getChat(_this.chat.id)
-        this.setChat(chat)
+        await this.setChat(chat)
         const chatSettings = _this.chat.settings
         const chatId = chat.id
         const imagePromptDetect = /^\s*(please|can\s+you|will\s+you)*\s*(give|generate|create|show|build|design)\s+(me)*\s*(an|a|set|a\s+set\s+of)*\s*([0-9]+|one|two|three|four)*\s+(image|photo|picture|pic)s*\s*(for\s+me)*\s*(of|[^a-z0-9]+|about|that\s+has|showing|with|having|depicting)\s+[^a-z0-9]*(.*)$/i
@@ -73,6 +82,17 @@ export class ChatRequest {
         const lastMessage = messages[messages.length - 1]
         const chatResponse = new ChatCompletionResponse(opts)
         _this.controller = new AbortController()
+
+        // Check if the last user message exceeds the model's max token limit
+        if (lastMessage?.role === 'user') {
+          const userMessageTokens = countMessageTokens(lastMessage, this.chat.settings.model, this.chat)
+          if (userMessageTokens > getModelMaxTokens(this.chat.settings.model)) {
+            chatResponse.updateFromError(`Your message is too long for the selected model (max ${getModelMaxTokens(this.chat.settings.model)} tokens, got ${userMessageTokens}). Please shorten your message.`)
+            this.updating = false
+            this.updatingMessage = ''
+            return chatResponse
+          }
+        }
 
         if (chatSettings.imageGenerationModel && !opts.didSummary && !opts.summaryRequest && lastMessage?.role === 'user') {
           const im = lastMessage.content.match(imagePromptDetect)
@@ -100,7 +120,7 @@ export class ChatRequest {
           }
         }
 
-        const model = this.getModel()
+        const model = await this.getModel()
         const modelDetail = getModelDetail(model)
         const maxTokens = getModelMaxTokens(model)
 
@@ -117,7 +137,7 @@ export class ChatRequest {
 
         // Inject hidden prompts if requested
         // if (!opts.summaryRequest)
-        this.buildHiddenPromptPrefixMessages(filtered, true)
+        await this.buildHiddenPromptPrefixMessages(filtered, true)
         const messagePayload = filtered
           .filter(m => { if (m.skipOnce) { delete m.skipOnce; return false } return true })
           .map(m => {
@@ -191,7 +211,7 @@ export class ChatRequest {
             if (typeof setting.apiTransform === 'function') {
               value = setting.apiTransform(chatId, setting, value)
             }
-            if (key === 'max_tokens') {
+            if (key === 'max_completion_tokens') {
               if (opts.maxTokens) value = opts.maxTokens // only as large as requested
               if (value > maxAllowed || value < 1) value = null // if over max model, do not define max
               if (value) value = Math.floor(value)
@@ -231,11 +251,11 @@ export class ChatRequest {
         return chatResponse
       }
 
-      getModel (): Model {
-        return this.chat.settings.model || getDefaultModel()
+      async getModel (): Promise<Model> {
+        return this.chat.settings.model || await getDefaultModel()
       }
 
-      private buildHiddenPromptPrefixMessages (messages: Message[], insert:boolean = false): Message[] {
+      private async buildHiddenPromptPrefixMessages (messages: Message[], insert:boolean = false): Promise<Message[]> {
         const chat = this.chat
         const chatSettings = chat.settings
         const hiddenPromptPrefix = mergeProfileFields(chatSettings, chatSettings.hiddenPromptPrefix).trim()
@@ -271,7 +291,7 @@ export class ChatRequest {
           }
           if (injectedPrompt) messages.pop()
         }
-        const model = this.getModel()
+        const model = await this.getModel()
         const messageDetail = getModelDetail(model)
         if (getLeadPrompt(this.getChat()).trim() && messageDetail.type === 'chat') {
           const lastMessage = (results.length && injectedPrompt && !isContinue) ? results[results.length - 1] : messages[messages.length - 1]
@@ -291,11 +311,12 @@ export class ChatRequest {
        * Gets an estimate of how many extra tokens will be added that won't be part of the visible messages
        * @param filtered
        */
-      private getTokenCountPadding (filtered: Message[], chat: Chat): number {
+      private async getTokenCountPadding (filtered: Message[], chat: Chat): Promise<number> {
+        const model = await this.getModel()
         let result = 0
         // add cost of hiddenPromptPrefix
-        result += this.buildHiddenPromptPrefixMessages(filtered)
-          .reduce((a, m) => a + countMessageTokens(m, this.getModel(), chat), 0)
+        result += (await this.buildHiddenPromptPrefixMessages(filtered))
+          .reduce((a, m) => a + countMessageTokens(m, model, chat), 0)
         // more here eventually?
         return result
       }
@@ -306,7 +327,7 @@ export class ChatRequest {
         const chatSettings = chat.settings
         const chatId = chat.id
         const reductionMode = chatSettings.continuousChat
-        const model = _this.getModel()
+        const model = await _this.getModel()
         const maxTokens = getModelMaxTokens(model) // max tokens for model
 
         const continueRequest = async () => {
